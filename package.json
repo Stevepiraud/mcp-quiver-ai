@@ -1,0 +1,34 @@
+{
+  "name": "mcp-quiver-ai",
+  "version": "0.1.0",
+  "description": "MCP server for Quiver AI — generate and vectorize SVGs from Claude Code",
+  "type": "module",
+  "bin": {
+    "mcp-quiver-ai": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "bun run src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["mcp", "quiver", "svg", "ai", "vector", "claude"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "@quiverai/sdk": "^0.4.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.5",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}
