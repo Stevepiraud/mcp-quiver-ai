@@ -6,6 +6,7 @@ import os from "node:os";
 // Mock the @quiverai/sdk module before importing anything that uses it
 const mockListModels = vi.fn();
 const mockGenerateSVG = vi.fn();
+const mockVectorizeSVG = vi.fn();
 
 vi.mock("@quiverai/sdk", () => {
   return {
@@ -13,6 +14,7 @@ vi.mock("@quiverai/sdk", () => {
       _opts: unknown;
       models = { listModels: mockListModels };
       createSVGs = { generateSVG: mockGenerateSVG };
+      vectorizeSVG = { vectorizeSVG: mockVectorizeSVG };
       constructor(opts: unknown) {
         this._opts = opts;
       }
@@ -21,7 +23,7 @@ vi.mock("@quiverai/sdk", () => {
 });
 
 import { QuiverAI } from "@quiverai/sdk";
-import { createQuiverClient, handleListModels, handleGenerateSvg, formatError } from "../src/index.js";
+import { createQuiverClient, handleListModels, handleGenerateSvg, handleVectorizeImage, formatError } from "../src/index.js";
 
 describe("createQuiverClient", () => {
   beforeEach(() => {
@@ -316,6 +318,129 @@ describe("handleGenerateSvg", () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toBe(
       "Invalid or missing API key. Check QUIVERAI_API_KEY."
+    );
+    // No file should be created
+    expect(fs.existsSync(outputPath)).toBe(false);
+  });
+});
+
+describe("handleVectorizeImage", () => {
+  let mockClient: ReturnType<typeof createQuiverClient>;
+  let tmpDir: string;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockClient = createQuiverClient("test-key");
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "quiver-vec-test-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("vectorizes an image URL and saves SVG", async () => {
+    const svgContent = '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>';
+    mockVectorizeSVG.mockResolvedValue({
+      id: "vec-123",
+      created: 1700000000,
+      data: [{ mimeType: "image/svg+xml", svg: svgContent }],
+      usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
+    });
+
+    const outputPath = path.join(tmpDir, "vectorized.svg");
+    const result = await handleVectorizeImage(mockClient, {
+      image: "https://example.com/photo.png",
+      output_path: outputPath,
+    });
+
+    // File should exist with the SVG content
+    expect(fs.existsSync(outputPath)).toBe(true);
+    expect(fs.readFileSync(outputPath, "utf-8")).toBe(svgContent);
+
+    // Result should contain file path and usage info
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0].type).toBe("text");
+    expect(result.content[0].text).toContain(outputPath);
+    expect(result.content[0].text).toContain("totalTokens");
+
+    // Verify the mock was called with { url } image
+    expect(mockVectorizeSVG).toHaveBeenCalledTimes(1);
+    const callArgs = mockVectorizeSVG.mock.calls[0][0];
+    expect(callArgs.image).toEqual({ url: "https://example.com/photo.png" });
+    expect(callArgs.model).toBe("arrow-preview");
+    expect(callArgs.stream).toBe(false);
+  });
+
+  it("reads local image as base64", async () => {
+    const svgContent = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="5" height="5"/></svg>';
+    mockVectorizeSVG.mockResolvedValue({
+      id: "vec-456",
+      created: 1700000000,
+      data: [{ mimeType: "image/svg+xml", svg: svgContent }],
+      usage: { inputTokens: 50, outputTokens: 150, totalTokens: 200 },
+    });
+
+    // Create a temp PNG file (doesn't need to be valid image data for the mock)
+    const imagePath = path.join(tmpDir, "test-image.png");
+    const fakeImageData = Buffer.from("fake-png-data");
+    fs.writeFileSync(imagePath, fakeImageData);
+
+    const outputPath = path.join(tmpDir, "from-local.svg");
+    await handleVectorizeImage(mockClient, {
+      image: imagePath,
+      output_path: outputPath,
+    });
+
+    // Verify the mock was called with base64 data and correct MIME type
+    expect(mockVectorizeSVG).toHaveBeenCalledTimes(1);
+    const callArgs = mockVectorizeSVG.mock.calls[0][0];
+    const expectedBase64 = `data:image/png;base64,${fakeImageData.toString("base64")}`;
+    expect(callArgs.image).toEqual({ base64: expectedBase64 });
+
+    // File should be saved
+    expect(fs.existsSync(outputPath)).toBe(true);
+    expect(fs.readFileSync(outputPath, "utf-8")).toBe(svgContent);
+  });
+
+  it("passes auto_crop and target_size", async () => {
+    const svgContent = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="3"/></svg>';
+    mockVectorizeSVG.mockResolvedValue({
+      id: "vec-789",
+      created: 1700000000,
+      data: [{ mimeType: "image/svg+xml", svg: svgContent }],
+      usage: { inputTokens: 80, outputTokens: 120, totalTokens: 200 },
+    });
+
+    const outputPath = path.join(tmpDir, "options-test.svg");
+    await handleVectorizeImage(mockClient, {
+      image: "https://example.com/logo.webp",
+      output_path: outputPath,
+      auto_crop: true,
+      target_size: 512,
+      n: 1,
+    });
+
+    expect(mockVectorizeSVG).toHaveBeenCalledTimes(1);
+    const callArgs = mockVectorizeSVG.mock.calls[0][0];
+    expect(callArgs.autoCrop).toBe(true);
+    expect(callArgs.targetSize).toBe(512);
+    expect(callArgs.n).toBe(1);
+  });
+
+  it("handles API errors", async () => {
+    const error = Object.assign(new Error("Too Many Requests"), { statusCode: 429 });
+    mockVectorizeSVG.mockRejectedValue(error);
+
+    const outputPath = path.join(tmpDir, "error.svg");
+    const result = await handleVectorizeImage(mockClient, {
+      image: "https://example.com/photo.png",
+      output_path: outputPath,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe(
+      "Rate limited (20 requests/60s). Wait and try again."
     );
     // No file should be created
     expect(fs.existsSync(outputPath)).toBe(false);

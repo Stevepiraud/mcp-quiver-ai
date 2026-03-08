@@ -154,6 +154,92 @@ export async function handleGenerateSvg(client: QuiverAI, input: GenerateSvgInpu
 }
 
 // ---------------------------------------------------------------------------
+// Vectorize Image handler
+// ---------------------------------------------------------------------------
+
+interface VectorizeImageInput {
+  image: string;
+  output_path: string;
+  auto_crop?: boolean;
+  target_size?: number;
+  n?: number;
+}
+
+export async function handleVectorizeImage(client: QuiverAI, input: VectorizeImageInput) {
+  try {
+    let image: { url: string } | { base64: string };
+
+    if (input.image.startsWith("http://") || input.image.startsWith("https://")) {
+      image = { url: input.image };
+    } else {
+      const fileData = fs.readFileSync(input.image);
+      const ext = path.extname(input.image).toLowerCase().replace(".", "");
+      const mime = ext === "jpg" ? "jpeg" : ext;
+      image = { base64: `data:image/${mime};base64,${fileData.toString("base64")}` };
+    }
+
+    const response = await client.vectorizeSVG.vectorizeSVG({
+      model: "arrow-preview",
+      image,
+      autoCrop: input.auto_crop,
+      targetSize: input.target_size,
+      n: input.n ?? 1,
+      stream: false,
+    });
+
+    // The response is a union type; for non-stream requests it should be SvgResponse
+    const svgResponse = response as {
+      id: string;
+      created: number;
+      data: Array<{ mimeType: string; svg: string }>;
+      usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
+    };
+
+    const dir = path.dirname(input.output_path);
+    fs.mkdirSync(dir, { recursive: true });
+
+    const savedPaths: string[] = [];
+
+    if (svgResponse.data.length === 1) {
+      fs.writeFileSync(input.output_path, svgResponse.data[0].svg, "utf-8");
+      savedPaths.push(input.output_path);
+    } else {
+      const ext = path.extname(input.output_path);
+      const base = input.output_path.slice(0, -ext.length);
+      for (let i = 0; i < svgResponse.data.length; i++) {
+        const filePath = `${base}-${i + 1}${ext}`;
+        fs.writeFileSync(filePath, svgResponse.data[i].svg, "utf-8");
+        savedPaths.push(filePath);
+      }
+    }
+
+    const summary = {
+      savedFiles: savedPaths,
+      usage: svgResponse.usage,
+    };
+
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify(summary, null, 2),
+        },
+      ],
+    };
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: formatError(error),
+        },
+      ],
+      isError: true,
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // MCP Server
 // ---------------------------------------------------------------------------
 
@@ -184,6 +270,22 @@ async function main() {
     async (args) => {
       const outputPath = args.output_path ?? `public/assets/${args.prompt.slice(0, 40).replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.svg`;
       return handleGenerateSvg(client, { ...args, output_path: outputPath });
+    },
+  );
+
+  server.tool(
+    "quiver_vectorize_image",
+    "Convert a raster image (PNG, JPEG, WebP) into an editable SVG using Quiver AI.",
+    {
+      image: z.string().describe("Image URL or local file path to vectorize"),
+      output_path: z.string().optional().describe("File path to save the SVG (default: public/assets/<auto>.svg)"),
+      auto_crop: z.boolean().optional().describe("Crop to dominant subject before vectorization (default: false)"),
+      target_size: z.number().min(128).max(4096).optional().describe("Resize to square pixels before inference (128-4096)"),
+      n: z.number().min(1).max(16).optional().describe("Number of variations (default: 1)"),
+    },
+    async (args) => {
+      const outputPath = args.output_path ?? `public/assets/${path.basename(args.image, path.extname(args.image))}.svg`;
+      return handleVectorizeImage(client, { ...args, output_path: outputPath });
     },
   );
 
