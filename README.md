@@ -4,17 +4,18 @@ MCP server for [Quiver AI](https://quiver.ai) — generate and vectorize SVGs fr
 
 ## Install
 
-Add to your Claude Code settings (`~/.claude/settings.json`):
+```bash
+claude mcp add quiver-ai -e QUIVERAI_API_KEY=your-api-key -- npx mcp-quiver-ai
+```
+
+Or manually add to your `~/.claude.json` under `mcpServers`:
 
 ```json
-{
-  "mcpServers": {
-    "quiver-ai": {
-      "command": "npx",
-      "args": ["mcp-quiver-ai"],
-      "env": { "QUIVERAI_API_KEY": "your-api-key" }
-    }
-  }
+"quiver-ai": {
+  "type": "stdio",
+  "command": "npx",
+  "args": ["mcp-quiver-ai"],
+  "env": { "QUIVERAI_API_KEY": "your-api-key" }
 }
 ```
 
