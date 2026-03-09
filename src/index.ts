@@ -88,7 +88,7 @@ export async function handleGenerateSvg(client: QuiverAI, input: GenerateSvgInpu
         return { url: ref };
       }
       const fileData = fs.readFileSync(ref);
-      return { base64: `data:image/png;base64,${fileData.toString("base64")}` };
+      return { base64: fileData.toString("base64") };
     });
 
     const response = await client.createSVGs.generateSVG({
@@ -101,13 +101,23 @@ export async function handleGenerateSvg(client: QuiverAI, input: GenerateSvgInpu
       stream: false,
     });
 
-    // The response is a union type; for non-stream requests it should be SvgResponse
+    // The SDK returns a union type: SvgResponse | PublicErrorEnvelope | Stream
+    // Check for error envelope before accessing .data
+    const resp = response as Record<string, unknown>;
+    if ("code" in resp && "message" in resp) {
+      throw new Error(`API error [${resp.code}]: ${resp.message}`);
+    }
+
     const svgResponse = response as {
       id: string;
       created: number;
       data: Array<{ mimeType: string; svg: string }>;
       usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
     };
+
+    if (!svgResponse.data) {
+      throw new Error(`Unexpected API response: ${JSON.stringify(response)}`);
+    }
 
     const dir = path.dirname(input.output_path);
     fs.mkdirSync(dir, { recursive: true });
@@ -173,9 +183,7 @@ export async function handleVectorizeImage(client: QuiverAI, input: VectorizeIma
       image = { url: input.image };
     } else {
       const fileData = fs.readFileSync(input.image);
-      const ext = path.extname(input.image).toLowerCase().replace(".", "");
-      const mime = ext === "jpg" ? "jpeg" : ext;
-      image = { base64: `data:image/${mime};base64,${fileData.toString("base64")}` };
+      image = { base64: fileData.toString("base64") };
     }
 
     const response = await client.vectorizeSVG.vectorizeSVG({
@@ -187,13 +195,23 @@ export async function handleVectorizeImage(client: QuiverAI, input: VectorizeIma
       stream: false,
     });
 
-    // The response is a union type; for non-stream requests it should be SvgResponse
+    // The SDK returns a union type: SvgResponse | PublicErrorEnvelope | Stream
+    // Check for error envelope before accessing .data
+    const resp = response as Record<string, unknown>;
+    if ("code" in resp && "message" in resp) {
+      throw new Error(`API error [${resp.code}]: ${resp.message}`);
+    }
+
     const svgResponse = response as {
       id: string;
       created: number;
       data: Array<{ mimeType: string; svg: string }>;
       usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
     };
+
+    if (!svgResponse.data) {
+      throw new Error(`Unexpected API response: ${JSON.stringify(response)}`);
+    }
 
     const dir = path.dirname(input.output_path);
     fs.mkdirSync(dir, { recursive: true });

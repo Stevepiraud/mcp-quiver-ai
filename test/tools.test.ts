@@ -395,8 +395,7 @@ describe("handleVectorizeImage", () => {
     // Verify the mock was called with base64 data and correct MIME type
     expect(mockVectorizeSVG).toHaveBeenCalledTimes(1);
     const callArgs = mockVectorizeSVG.mock.calls[0][0];
-    const expectedBase64 = `data:image/png;base64,${fakeImageData.toString("base64")}`;
-    expect(callArgs.image).toEqual({ base64: expectedBase64 });
+    expect(callArgs.image).toEqual({ base64: fakeImageData.toString("base64") });
 
     // File should be saved
     expect(fs.existsSync(outputPath)).toBe(true);
